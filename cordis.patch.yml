@@ -1,0 +1,3 @@
+- insert:
+    - id: composer-predictions
+      name: './predict-server.js'

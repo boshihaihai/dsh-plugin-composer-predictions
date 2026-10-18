@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Composer predictions">
+  <g fill="#6397ff" transform="translate(32 32) scale(1.5) translate(-32 -32)">
+    <path d="M19.5 24.1 26.5 31.1Q27.1 31.7 26.5 32.3L19.5 39.3Q18.9 39.9 18.3 39.3L16.9 37.9Q16.3 37.3 16.9 36.7L21.9 31.7 16.9 26.7Q16.3 26.1 16.9 25.5L18.3 24.1Q18.9 23.5 19.5 24.1Z"/>
+    <rect x="27" y="35.5" width="14.1" height="3.3" rx="0.5"/>
+    <rect x="42.3" y="35.5" width="5.1" height="3.3" rx="0.5" fill="#9abaff"/>
+  </g>
+</svg>

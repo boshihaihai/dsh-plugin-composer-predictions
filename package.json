@@ -1,0 +1,54 @@
+{
+  "name": "dsh-plugin-composer-predictions",
+  "version": "1.2.2",
+  "description": "Composer predictions for the DeepSeek Harness: predict your next chat message after an assistant reply and show it as in-editor ghost text; Tab accepts it into the draft.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boshihaihai/dsh-plugin-composer-predictions.git"
+  },
+  "homepage": "https://github.com/boshihaihai/dsh-plugin-composer-predictions#readme",
+  "bugs": {
+    "url": "https://github.com/boshihaihai/dsh-plugin-composer-predictions/issues"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/client.test.js test/server.test.js",
+    "test:browser": "node test/browser-smoke.cjs",
+    "check": "node --check client.js && node --check predict-server.js",
+    "pack:plugin": "npm pack --pack-destination dist"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": ["dsh", "deepseek-harness", "plugin", "composer", "prediction", "ghost-text"],
+  "exports": {
+    ".": "./predict-server.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "predict-server.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}
