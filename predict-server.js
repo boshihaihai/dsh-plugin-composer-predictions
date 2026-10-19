@@ -240,6 +240,8 @@ async function predict(ctx, sessionId, signal) {
   }];
 
   let text = '';
+  const textBlocks = new Map();
+  let anonymousIndex = 0;
   let finish;
   let usage;
   let textDeltas = 0;
@@ -255,15 +257,19 @@ async function predict(ctx, sessionId, signal) {
   for await (const chunk of stream) {
     signal.throwIfAborted();
     if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') {
-      text += chunk.text;
+      const index = chunk.index ?? anonymousIndex;
+      textBlocks.set(index, (textBlocks.get(index) ?? '') + chunk.text);
       textDeltas += 1;
-    } else if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && text === '') {
-      text = typeof chunk.block.text === 'string' ? chunk.block.text : '';
+    } else if (chunk?.type === 'block-end' && chunk.block?.type === 'text') {
+      const index = chunk.index ?? anonymousIndex++;
+      // A completed block is authoritative, including text already streamed as deltas.
+      if (typeof chunk.block.text === 'string') textBlocks.set(index, chunk.block.text);
     } else if (chunk?.type === 'usage') {
       usage = chunk.usage;
     } else if (chunk?.type === 'finish') {
       finish = chunk.reason;
     }
+    text = [...textBlocks].sort(([a], [b]) => a - b).map(([, value]) => value).join('');
     // A suggestion is tiny. Stop malformed/excessively verbose streams early.
     if (text.length > MAX_SUGGESTION_CHARS * 4) {
       return { suggestion: null, reason: 'too-long' };
@@ -274,6 +280,9 @@ async function predict(ctx, sessionId, signal) {
   }
   if (finish?.kind === 'aborted') {
     throw cancelledError();
+  }
+  if (finish?.kind === 'max-tokens') {
+    return { suggestion: null, reason: 'incomplete' };
   }
 
   const trimmed = text.trim();
