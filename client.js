@@ -129,6 +129,8 @@ window.__ModuleLoader__.load({
 
     function createPredictionStore() {
       const store = createSnapshotStore(IDLE);
+      // In-memory only: navigation preserves ready suggestions, never pending requests.
+      const readyBySession = new Map();
       let controller = null;
       const cancel = () => {
         if (controller !== null) {
@@ -140,8 +142,14 @@ window.__ModuleLoader__.load({
         getSnapshot: store.getSnapshot,
         subscribe: store.subscribe,
         cancel,
+        activate: (sessionId) => {
+          cancel();
+          store.set(readyBySession.get(sessionId) ?? IDLE);
+        },
         matches: (sessionId, request) => controller === request && store.getSnapshot().sessionId === sessionId,
         clear: (sessionId) => {
+          if (sessionId === undefined) readyBySession.clear();
+          else readyBySession.delete(sessionId);
           if (sessionId !== undefined) {
             const current = store.getSnapshot();
             if (current.sessionId !== null && current.sessionId !== sessionId) return;
@@ -151,6 +159,7 @@ window.__ModuleLoader__.load({
         },
         begin: (sessionId, nextController) => {
           cancel();
+          readyBySession.delete(sessionId);
           controller = nextController;
           store.set({ sessionId, phase: 'loading', text: '', error: null, raw: null });
         },
@@ -158,7 +167,14 @@ window.__ModuleLoader__.load({
           if (controller !== request || request.signal.aborted) return;
           controller = null;
           if (text === '') store.set({ sessionId: null, phase: 'idle', text: '', error: null, raw: raw ?? null });
-          else store.set({ sessionId, phase: 'ready', text, error: null, raw: raw ?? null });
+          else {
+            const ready = { sessionId, phase: 'ready', text, error: null, raw: raw ?? null };
+            readyBySession.delete(sessionId);
+            readyBySession.set(sessionId, ready);
+            // Bound retained transcript/debug data in long-lived browser sessions.
+            if (readyBySession.size > 100) readyBySession.delete(readyBySession.keys().next().value);
+            store.set(ready);
+          }
         },
         fail: (sessionId, request, message, raw) => {
           if (controller !== request || request.signal.aborted) return;
@@ -364,10 +380,12 @@ window.__ModuleLoader__.load({
         ghostLayer.clear();
       }, [stop, prediction, sessionId, ghostLayer]);
 
-      React.useEffect(() => () => {
-        stop();
-        prediction.clear(sessionId);
-        ghostLayer.clear();
+      React.useEffect(() => {
+        prediction.activate(sessionId);
+        return () => {
+          stop();
+          ghostLayer.clear();
+        };
       }, [stop, prediction, sessionId, ghostLayer]);
 
       React.useEffect(() => {
@@ -375,11 +393,12 @@ window.__ModuleLoader__.load({
         previous.current = { sessionId, running };
         const switched = prior.sessionId !== sessionId;
         if (switched) composing.current = false;
-        if (switched || running || !enabled || !draftEmpty) {
+        if (running || !enabled || !draftEmpty) {
           stop();
-          prediction.clear();
+          prediction.clear(enabled ? sessionId : undefined);
           return;
         }
+        if (switched) return;
         if (!prior.running || !sessionId || composing.current) return;
         // A turn just finished; let the transcript settle before asking.
         timer.current = setTimeout(() => {
@@ -580,7 +599,10 @@ window.__ModuleLoader__.load({
             background: enabled ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l2)',
             transition: 'background 120ms ease',
           },
-          onClick: () => preferences.set(!enabled),
+          onClick: () => {
+            if (enabled) props.prediction.clear();
+            preferences.set(!enabled);
+          },
         }, h('span', {
           style: { width: '16px', height: '16px', borderRadius: '50%', background: 'var(--dsw-alias-bg-overlay)' },
         })));
@@ -608,7 +630,7 @@ window.__ModuleLoader__.load({
         id: 'composer-predictions',
         order: 21,
         locale: NS,
-        inject: () => ({ preferences }),
+        inject: () => ({ preferences, prediction }),
       }, PredictionSettingsRow));
 
       return () => {

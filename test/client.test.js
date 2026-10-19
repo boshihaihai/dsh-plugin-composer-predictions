@@ -305,3 +305,68 @@ test('layout grows for wrapped text, shrinks after widening, and restores the or
   assert.equal(client.editor.style.minHeight, '28px');
   assert.equal(client.grow.style.position, '');
 });
+
+test('restores each session suggestion after navigation without another model call', async (t) => {
+  const client = await setup(t);
+  await ready(client, '会话 A 的建议');
+  await client.update({ sessionId: 'session-b' });
+  assert.equal(client.ghost(), null);
+  await client.finishTurn();
+  await client.advance();
+  await client.resolve(1, { suggestion: '会话 B 的建议' });
+  await client.update({ sessionId: 'session-a' });
+  assert.match(client.ghostText(), /会话 A 的建议/);
+  await client.update({ sessionId: 'session-b' });
+  assert.match(client.ghostText(), /会话 B 的建议/);
+  assert.equal(client.requests.length, 2);
+});
+
+test('ready suggestions survive component unmount and remount', async (t) => {
+  const client = await setup(t);
+  await ready(client, '返回后继续显示');
+  await client.remount({ sessionId: 'session-b' });
+  assert.equal(client.ghost(), null);
+  await client.remount({ sessionId: 'session-a' });
+  assert.match(client.ghostText(), /返回后继续显示/);
+  assert.equal(client.requests.length, 1);
+});
+
+test('accepted, dismissed, edited and superseded suggestions are not resurrected', async (t) => {
+  for (const action of ['Tab', 'Escape', 'edit', 'running', 'draft']) {
+    const client = await setup(t);
+    await ready(client);
+    if (action === 'edit') await client.event('beforeinput');
+    else if (action === 'running') await client.update({ session: { running: true } });
+    else if (action === 'draft') await client.update({ input: { draft: '用户的草稿' } });
+    else await client.event('keydown', { key: action });
+    await client.update({ sessionId: 'session-b', session: { running: false }, input: { draft: '' } });
+    await client.update({ sessionId: 'session-a' });
+    assert.equal(client.ghost(), null, action);
+  }
+});
+
+test('disabling predictions clears cached suggestions in inactive sessions', async (t) => {
+  const client = await setup(t);
+  await ready(client);
+  await client.update({ sessionId: 'session-b' });
+  await client.toggle();
+  await client.toggle();
+  await client.update({ sessionId: 'session-a' });
+  assert.equal(client.ghost(), null);
+  assert.equal(client.requests.length, 1);
+});
+
+test('returning to a running session or existing draft invalidates its cached suggestion', async (t) => {
+  for (const props of [{ session: { running: true } }, { input: { draft: '保留我的草稿' } }]) {
+    const client = await setup(t);
+    await ready(client);
+    await client.update({ sessionId: 'session-b' });
+    await client.update({ sessionId: 'session-a', ...props });
+    assert.equal(client.ghost(), null);
+    await client.update({ sessionId: 'session-b', session: { running: false }, input: { draft: '' } });
+    await client.update({ sessionId: 'session-a' });
+    assert.equal(client.ghost(), null);
+    assert.equal(client.inserted.length, 0);
+    assert.equal(client.requests.length, 1);
+  }
+});

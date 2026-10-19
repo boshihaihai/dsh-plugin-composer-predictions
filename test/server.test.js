@@ -218,6 +218,39 @@ test('reports provider errors and cancellation without returning partial text', 
   assert.equal((await cancelled.request()).statusCode, 499);
 });
 
+test('rejects short but incomplete output when the token budget is exhausted', async () => {
+  const host = setup({ stream: () => (async function* () {
+    yield { type: 'text-delta', index: 0, text: '请执行 `npm' };
+    yield { type: 'finish', reason: { kind: 'max-tokens' } };
+  })() });
+  const response = await host.request();
+  assert.equal(response.body.suggestion, null);
+  assert.equal(response.body.reason, 'incomplete');
+});
+
+test('collects multiple completed text blocks with or without indexes', async () => {
+  for (const indexed of [true, false]) {
+    const host = setup({ stream: () => (async function* () {
+      yield { type: 'block-end', ...(indexed ? { index: 0 } : {}), block: { type: 'text', text: '请补充测试，' } };
+      yield { type: 'block-end', ...(indexed ? { index: 1 } : {}), block: { type: 'text', text: '然后解释结果。' } };
+      yield { type: 'finish', reason: { kind: 'stop' } };
+    })() });
+    assert.equal((await host.request()).body.suggestion, '请补充测试，然后解释结果。');
+  }
+});
+
+test('assembles interleaved blocks in index order without duplicating deltas', async () => {
+  const host = setup({ stream: () => (async function* () {
+    yield { type: 'text-delta', index: 2, text: '再检查' };
+    yield { type: 'text-delta', index: 0, text: '先测试，' };
+    yield { type: 'block-end', index: 1, block: { type: 'reasoning', text: 'private reasoning' } };
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: '先测试，' } };
+    yield { type: 'block-end', index: 2, block: { type: 'text', text: '再检查结果。' } };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  })() });
+  assert.equal((await host.request()).body.suggestion, '先测试，再检查结果。');
+});
+
 test('bounds a model stream that ignores cancellation to 30 seconds', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let started;

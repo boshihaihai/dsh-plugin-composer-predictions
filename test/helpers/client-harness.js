@@ -317,7 +317,7 @@ export async function createClientHarness(options = {}) {
   };
   const dockSlot = slots.get('conversation.input.dock');
   const settingsSlot = slots.get('settings.general.item');
-  const dock = mount(dockSlot.component, {
+  let dock = mount(dockSlot.component, {
     ...dockSlot.slot.inject(), sessionId: 'session-a', session: { running: false }, input: { draft: '' }, inputActions, t, ...options.props,
   });
   const settings = mount(settingsSlot.component, { ...settingsSlot.slot.inject(), t });
@@ -335,6 +335,12 @@ export async function createClientHarness(options = {}) {
     async toggle() { settings.render(); findElement(settings.output, (node) => node.props?.role === 'switch').props.onClick(); await flush(); },
     async event(type, init) { const event = dom.dispatch(type, init); await flush(); return event; },
     async unmount() { dock.unmount(); await flush(); },
+    async remount(props = {}) {
+      const previousProps = dock.props;
+      dock.unmount();
+      dock = mount(dockSlot.component, { ...previousProps, ...props });
+      await flush();
+    },
     flush,
     dispose() { dock.unmount(); settings.unmount(); cleanup?.(); },
   };
