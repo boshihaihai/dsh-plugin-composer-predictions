@@ -152,7 +152,7 @@ test('keeps the latest user goal and assistant reply in bounded JSON context', a
   const host = setup({ events });
   await host.request();
   const text = host.calls[0].messages[0].content[0].text;
-  const transcript = text.split('Conversation transcript (JSON data):\n')[1].split('\n\nSuggest one useful')[0];
+  const transcript = text.split('Conversation transcript (JSON data):\n')[1].split('\n\nSuggest up to 3')[0];
   const rows = JSON.parse(transcript);
   assert.ok(transcript.length <= 12000);
   assert.ok(rows.length <= 18);
@@ -168,12 +168,41 @@ test('supports plain text message content and heavily escaped text', async () =>
   ] });
   await host.request();
   const text = host.calls[0].messages[0].content[0].text;
-  const transcript = text.split('Conversation transcript (JSON data):\n')[1].split('\n\nSuggest one useful')[0];
+  const transcript = text.split('Conversation transcript (JSON data):\n')[1].split('\n\nSuggest up to 3')[0];
   const rows = JSON.parse(transcript);
   assert.ok(transcript.length <= 12000);
   assert.equal(rows[0].role, 'user');
   assert.match(rows[0].text, /用户目标$/);
   assert.equal(rows[1].text, '已完成');
+});
+
+test('returns the three most likely candidates from a JSON array', async () => {
+  const host = setup({ text: JSON.stringify(['请补充一个示例。', '请说明异常处理。', '请把关键步骤整理成清单。', '第四条会被丢弃']) });
+  const response = await host.request();
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.suggestions, ['请补充一个示例。', '请说明异常处理。', '请把关键步骤整理成清单。']);
+  assert.equal(response.body.suggestion, '请补充一个示例。');
+  assert.equal(response.body.debug.candidateCount, 3);
+});
+
+test('accepts a fenced JSON array and drops duplicates, non-strings, and the SKIP token', async () => {
+  const host = setup({ text: '```json\n["同一个候选", "同一个候选", "", "SKIP", 3, null, "另一个候选"]\n```' });
+  const response = await host.request();
+  assert.deepEqual(response.body.suggestions, ['同一个候选', '另一个候选']);
+  assert.equal(response.body.suggestion, '同一个候选');
+});
+
+test('keeps shorter candidates when one array entry is too long', async () => {
+  const host = setup({ text: JSON.stringify(['x'.repeat(401), '可用的候选']) });
+  const response = await host.request();
+  assert.deepEqual(response.body.suggestions, ['可用的候选']);
+  assert.equal(response.body.debug.candidateCount, 1);
+});
+
+test('treats a malformed JSON-looking reply as one plain message', async () => {
+  const host = setup({ text: '[新功能] 说明一下实现思路' });
+  const response = await host.request();
+  assert.deepEqual(response.body.suggestions, ['[新功能] 说明一下实现思路']);
 });
 
 test('preserves meaningful quotes and trailing code backticks', async () => {

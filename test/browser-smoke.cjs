@@ -31,7 +31,12 @@ const assert = require('node:assert/strict');
       const slots = new Map();
       window.__DSH_COMPOSER_PREDICTIONS_TOKEN__ = 'fixture-token';
       window.insertions = [];
-      window.fetch = async () => ({ ok: true, json: async () => ({ suggestion: '请补充几个实际使用示例，说明遇到异常时如何处理，并把关键操作整理成一份可以直接参考的简短清单。' }) });
+      window.candidates = [
+        '请补充几个实际使用示例，说明遇到异常时如何处理，并把关键操作整理成一份可以直接参考的简短清单。',
+        '请说明这些改动对现有配置的兼容性影响，并给出回滚步骤。',
+        '请把上面的步骤整理成一份五分钟内可以复现的最小操作清单。',
+      ];
+      window.fetch = async () => ({ ok: true, json: async () => ({ suggestions: window.candidates }) });
       window.dispose = await plugin.apply({
         effect: f => f(), locale: { register: () => () => {} },
         slots: { inject: (_, f) => f(), register: (config, component) => slots.set(config.name, { config, component }) },
@@ -77,14 +82,31 @@ const assert = require('node:assert/strict');
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => insertions.length), 0);
     await page.locator('[data-composer-input]').focus();
+    // ArrowDown cycles candidates in a real DOM; the hint shows the position.
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => document.querySelector('[data-composer-predictions="inline-text"]')?.textContent.includes('2/3'));
+    assert.equal(
+      await page.locator(ghost).evaluate(el => el.textContent.includes('兼容性影响')),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => document.querySelector('[data-composer-predictions="inline-text"]')?.textContent.includes('3/3'));
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => document.querySelector('[data-composer-predictions="inline-text"]')?.textContent.includes('1/3'));
+    await page.keyboard.press('ArrowUp');
+    await page.waitForFunction(() => document.querySelector('[data-composer-predictions="inline-text"]')?.textContent.includes('3/3'));
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => insertions.length), 1);
+    assert.equal(
+      await page.evaluate(() => insertions[0] === window.candidates[2]),
+      true,
+    );
     assert.equal(await page.locator(ghost).count(), 0);
     assert.equal(await page.locator('[data-composer-input]').evaluate(el => el.style.minHeight), '');
     assert.notEqual(await page.locator('[data-composer-placeholder]').evaluate(el => getComputedStyle(el).display), 'none');
     await page.evaluate(() => { runner.unmount(); dispose(); });
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ passed: true, narrow, wide, checks: ['native observers', 'responsive layout', 'editor remount', 'toolbar Tab', 'editor Tab', 'cleanup'], pageErrors: errors }, null, 2));
+    console.log(JSON.stringify({ passed: true, narrow, wide, checks: ['native observers', 'responsive layout', 'editor remount', 'toolbar Tab', 'candidate cycling', 'editor Tab', 'cleanup'], pageErrors: errors }, null, 2));
   } finally {
     await browser.close();
   }

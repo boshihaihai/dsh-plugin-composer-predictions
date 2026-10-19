@@ -2,13 +2,14 @@
 
 <img src="icon.svg" width="72" height="72" alt="输入预测图标" />
 
-为 **DeepSeek Harness（DSH）** 推荐下一条提示词。助手回答结束后，推荐内容以浅色文字显示在输入框内，按 **Tab** 填入草稿，编辑后自行发送。
+为 **DeepSeek Harness（DSH）** 推荐下一条提示词。助手回答结束后，推荐内容以浅色文字显示在输入框内：按 **↑ / ↓** 在候选之间切换，按 **Tab** 把当前候选填入草稿，编辑后自行发送。
 
 [下载插件](https://github.com/boshihaihai/dsh-plugin-composer-predictions/releases/latest) · [反馈问题](https://github.com/boshihaihai/dsh-plugin-composer-predictions/issues)
 
 ## 使用
 
-- 根据当前对话生成推荐，沿用用户的语言。
+- 根据当前对话生成最多 3 条候选推荐（第一条最可能），沿用用户的语言。
+- **↑ / ↓** 切换候选（显示 `1/3` 计数），**Tab** 填入当前候选；Shift/Ctrl/Alt/⌘ + 方向键保留原生行为。
 - 仅在输入框为空时显示；开始输入、按 Esc 或切换会话即可取消。
 - 在 **设置 → 通用 → 显示输入预测** 中开启或关闭，默认开启。
 - 使用当前会话模型，每次推荐会增加一次模型请求。

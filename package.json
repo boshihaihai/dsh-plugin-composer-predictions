@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-composer-predictions",
-  "version": "1.2.2",
-  "description": "Composer predictions for the DeepSeek Harness: predict your next chat message after an assistant reply and show it as in-editor ghost text; Tab accepts it into the draft.",
+  "version": "1.3.0",
+  "description": "Composer predictions for the DeepSeek Harness: predict up to three next chat messages after an assistant reply, show the selected one as in-editor ghost text, switch with ArrowUp/ArrowDown, and insert with Tab.",
   "license": "MIT",
   "repository": {
     "type": "git",
