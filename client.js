@@ -2,13 +2,14 @@
  * Composer predictions — Client half.
  *
  * Replicates the observably-relevant part of ChatGPT/Codex composer predictions:
- *  1. after an assistant turn finishes, ask the Host to predict the next user message;
- *  2. render the prediction as subdued ghost text **inline inside the composer**,
- *     at the caret position where the next message would start (the composer's
- *     placeholder is hidden while the ghost is shown);
- *  3. Tab puts the text into the draft without sending it;
- *  4. typing / sending / switching turns dismisses the prediction;
- *  5. "Show predictions" appears in Settings → General.
+ *  1. after an assistant turn finishes, ask the Host to predict the next user messages;
+ *  2. render the selected prediction as subdued ghost text **inline inside the
+ *     composer**, at the caret position where the next message would start (the
+ *     composer's placeholder is hidden while the ghost is shown);
+ *  3. Tab puts the selected prediction into the draft without sending it;
+ *  4. ArrowUp/ArrowDown cycle between the candidates while the ghost is visible;
+ *  5. typing / sending / switching turns dismisses the prediction;
+ *  6. "Show predictions" appears in Settings → General.
  *
  * The Client half asks the Host over one private same-origin HTTP route
  * (`POST /composer-predictions/predict`), so the plugin needs no Remote/typert
@@ -35,17 +36,19 @@ window.__ModuleLoader__.load({
 
     const zh = {
       'prediction.pressTabToAccept': '按 Tab 接受',
+      'prediction.cycleHint': '↑↓ 切换',
       'prediction.accept': '填入',
       'prediction.dismiss': '忽略',
       'settings.title': '显示输入预测',
-      'settings.description': '助手回复结束后，根据当前对话预测你的下一条消息；按 Tab 填为可编辑草稿',
+      'settings.description': '助手回复结束后，根据当前对话预测你的下一条消息；按 Tab 填为可编辑草稿，↑↓ 切换候选',
     };
     const en = {
       'prediction.pressTabToAccept': 'Press Tab to accept',
+      'prediction.cycleHint': '↑↓ to switch',
       'prediction.accept': 'Insert',
       'prediction.dismiss': 'Dismiss',
       'settings.title': 'Show predictions',
-      'settings.description': 'Predict your next message from the conversation after an assistant reply; press Tab to insert it as an editable draft',
+      'settings.description': 'Predict your next message from the conversation after an assistant reply; press Tab to insert it as an editable draft and ↑↓ to switch candidates',
     };
 
     /**
@@ -125,7 +128,7 @@ window.__ModuleLoader__.load({
       };
     }
 
-    const IDLE = Object.freeze({ sessionId: null, phase: 'idle', text: '', error: null, raw: null });
+    const IDLE = Object.freeze({ sessionId: null, phase: 'idle', suggestions: [], index: 0, error: null, raw: null });
 
     function createPredictionStore() {
       const store = createSnapshotStore(IDLE);
@@ -152,18 +155,26 @@ window.__ModuleLoader__.load({
         begin: (sessionId, nextController) => {
           cancel();
           controller = nextController;
-          store.set({ sessionId, phase: 'loading', text: '', error: null, raw: null });
+          store.set({ sessionId, phase: 'loading', suggestions: [], index: 0, error: null, raw: null });
         },
-        settle: (sessionId, request, text, raw) => {
+        settle: (sessionId, request, suggestions, raw) => {
           if (controller !== request || request.signal.aborted) return;
           controller = null;
-          if (text === '') store.set({ sessionId: null, phase: 'idle', text: '', error: null, raw: raw ?? null });
-          else store.set({ sessionId, phase: 'ready', text, error: null, raw: raw ?? null });
+          const list = Array.isArray(suggestions) ? suggestions : [];
+          if (list.length === 0) store.set({ sessionId: null, phase: 'idle', suggestions: [], index: 0, error: null, raw: raw ?? null });
+          else store.set({ sessionId, phase: 'ready', suggestions: list, index: 0, error: null, raw: raw ?? null });
+        },
+        cycle: (sessionId, delta) => {
+          const current = store.getSnapshot();
+          if (current.sessionId !== sessionId || current.phase !== 'ready' || current.suggestions.length < 2) return;
+          const length = current.suggestions.length;
+          const index = ((current.index + delta) % length + length) % length;
+          if (index !== current.index) store.set({ ...current, index });
         },
         fail: (sessionId, request, message, raw) => {
           if (controller !== request || request.signal.aborted) return;
           controller = null;
-          store.set({ sessionId, phase: 'idle', text: '', error: message, raw: raw ?? null });
+          store.set({ sessionId, phase: 'idle', suggestions: [], index: 0, error: message, raw: raw ?? null });
         },
       };
     }
@@ -403,10 +414,17 @@ window.__ModuleLoader__.load({
             })
             .then((value) => {
               if (controller.signal.aborted || !prediction.matches(sessionId, controller)) return;
-              const suggestion = value !== null && value !== undefined && typeof value.suggestion === 'string'
+              const listed = value !== null && value !== undefined && Array.isArray(value.suggestions)
+                ? value.suggestions
+                  .filter((item) => typeof item === 'string')
+                  .map((item) => item.trim())
+                  .filter((item) => item !== '')
+                : [];
+              // Older Hosts answer with one `suggestion`; keep that contract usable.
+              const single = value !== null && value !== undefined && typeof value.suggestion === 'string'
                 ? value.suggestion.trim()
                 : '';
-              prediction.settle(sessionId, controller, suggestion, value);
+              prediction.settle(sessionId, controller, listed.length > 0 ? listed : (single !== '' ? [single] : []), value);
             }, (error) => {
               if (controller.signal.aborted || !prediction.matches(sessionId, controller)) return;
               const message = error instanceof Error ? error.message : String(error);
@@ -416,13 +434,19 @@ window.__ModuleLoader__.load({
         }, 350);
       }, [sessionId, running, enabled, draftEmpty, predict, prediction, stop]);
 
+      const suggestions = Array.isArray(state.suggestions) ? state.suggestions : [];
+      const total = suggestions.length;
+      const index = total === 0 ? 0 : Math.min(Math.max(state.index, 0), total - 1);
+      const text = total === 0 ? '' : suggestions[index];
       const active = enabled
         && !running
         && draftEmpty
         && state.phase === 'ready'
         && state.sessionId === sessionId
-        && typeof state.text === 'string'
-        && state.text !== '';
+        && text !== '';
+      const hint = total > 1
+        ? `${t('prediction.pressTabToAccept')} · ${t('prediction.cycleHint')} ${index + 1}/${total}`
+        : t('prediction.pressTabToAccept');
 
       // Observe only while visible; coalesce DOM and width changes into one frame.
       React.useEffect(() => {
@@ -430,8 +454,7 @@ window.__ModuleLoader__.load({
           ghostLayer.clear();
           return;
         }
-        const hint = t('prediction.pressTabToAccept');
-        ghostLayer.show(state.text, hint);
+        ghostLayer.show(text, hint);
         let frame = null;
         let observed = null;
         const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
@@ -453,7 +476,7 @@ window.__ModuleLoader__.load({
               dismiss();
               return;
             }
-            ghostLayer.sync(state.text, hint);
+            ghostLayer.sync(text, hint);
             observeEditor();
           });
         }
@@ -468,7 +491,7 @@ window.__ModuleLoader__.load({
           if (frame !== null) window.cancelAnimationFrame(frame);
           ghostLayer.clear();
         };
-      }, [active, state.text, t, ghostLayer, dismiss]);
+      }, [active, text, hint, t, ghostLayer, dismiss]);
 
       // Restrict shortcuts to the editor; toolbar Tab navigation remains native.
       React.useEffect(() => {
@@ -498,8 +521,15 @@ window.__ModuleLoader__.load({
             return;
           }
           if (!active || !ghostLayer.isActive() || !editorEmpty()) return;
+          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && total > 1
+            && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            prediction.cycle(sessionId, event.key === 'ArrowDown' ? 1 : -1);
+            return;
+          }
           if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-          if (inputActions?.insertText?.(state.text, inputActions.captureInsertion?.())) {
+          if (inputActions?.insertText?.(text, inputActions.captureInsertion?.())) {
             event.preventDefault();
             event.stopPropagation();
             dismiss();
@@ -517,7 +547,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener('submit', onSubmit, true);
           window.removeEventListener('keydown', onKeyDown, true);
         };
-      }, [active, state.text, inputActions, ghostLayer, dismiss]);
+      }, [active, text, total, sessionId, prediction, inputActions, ghostLayer, dismiss]);
 
       let debugEnabled = false;
       try {
@@ -529,7 +559,7 @@ window.__ModuleLoader__.load({
         role: 'status',
         'aria-live': 'polite',
         style: { position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' },
-      }, `${state.text} — ${t('prediction.pressTabToAccept')}`) : null;
+      }, `${text} — ${hint}`) : null;
       return h('div', {
         'data-composer-predictions': 'debug',
         style: {
@@ -546,7 +576,7 @@ window.__ModuleLoader__.load({
           padding: '4px 6px',
           maxWidth: '80vw',
         },
-      }, `running=${String(running)} phase=${state.phase} error=${state.error ?? ''} text=${JSON.stringify(state.text)} draft=${JSON.stringify(draft)} sessionId=${sessionId}`);
+      }, `running=${String(running)} phase=${state.phase} error=${state.error ?? ''} text=${JSON.stringify(text)} index=${index}/${total} suggestions=${JSON.stringify(suggestions)} draft=${JSON.stringify(draft)} sessionId=${sessionId}`);
     }
 
     /** Settings → General → Composer preference row. */

@@ -8,11 +8,11 @@ async function setup(t, options) {
   return client;
 }
 
-async function ready(client, suggestion = '请继续实现并验证这些修改') {
+async function ready(client, body = '请继续实现并验证这些修改') {
   await client.finishTurn();
   await client.advance();
   assert.equal(client.requests.length, 1, 'completed turn should request one prediction');
-  await client.resolve(0, { suggestion });
+  await client.resolve(0, typeof body === 'string' ? { suggestion: body } : body);
   assert.ok(client.ghost(), 'prediction should appear inside the composer');
 }
 
@@ -217,6 +217,67 @@ test('a nonempty live editor cannot accept while the draft prop still lags behin
   const event = await client.event('keydown', { key: 'Tab' });
   assert.equal(event.defaultPrevented, false);
   assert.equal(client.inserted.length, 0);
+});
+
+test('arrow keys cycle candidates and Tab inserts the selected one', async (t) => {
+  const client = await setup(t);
+  await ready(client, { suggestions: ['第一条候选', '第二条候选', '第三条候选'] });
+  assert.match(client.ghostText(), /第一条候选/);
+  assert.match(client.ghostText(), /1\/3/);
+  const down = await client.event('keydown', { key: 'ArrowDown' });
+  assert.equal(down.defaultPrevented, true);
+  assert.match(client.ghostText(), /第二条候选/);
+  assert.match(client.ghostText(), /2\/3/);
+  await client.event('keydown', { key: 'ArrowDown' });
+  assert.match(client.ghostText(), /第三条候选/);
+  await client.event('keydown', { key: 'ArrowDown' });
+  assert.match(client.ghostText(), /第一条候选/, 'Down wraps to the first candidate');
+  await client.event('keydown', { key: 'ArrowUp' });
+  assert.match(client.ghostText(), /第三条候选/, 'Up wraps to the last candidate');
+  const tab = await client.event('keydown', { key: 'Tab' });
+  assert.equal(tab.defaultPrevented, true);
+  assert.equal(client.inserted.length, 1);
+  assert.equal(client.inserted[0].text, '第三条候选');
+  assert.equal(client.sent.length, 0);
+  assert.equal(client.ghost(), null);
+});
+
+test('a single candidate leaves the arrow keys native', async (t) => {
+  const client = await setup(t);
+  await ready(client, '唯一的候选');
+  const event = await client.event('keydown', { key: 'ArrowDown' });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(client.inserted.length, 0);
+  assert.match(client.ghostText(), /唯一的候选/);
+  assert.doesNotMatch(client.ghostText(), /1\/1/);
+});
+
+test('modified arrows and a typed draft keep native arrow behavior', async (t) => {
+  const client = await setup(t);
+  await ready(client, { suggestions: ['第一候选', '第二候选'] });
+  for (const modifier of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+    const event = await client.event('keydown', { key: 'ArrowDown', ...modifier });
+    assert.equal(event.defaultPrevented, false, JSON.stringify(modifier));
+    assert.match(client.ghostText(), /第一候选/, JSON.stringify(modifier));
+  }
+  client.editor.textContent = '已经输入';
+  const typed = await client.event('keydown', { key: 'ArrowDown' });
+  assert.equal(typed.defaultPrevented, false);
+  assert.match(client.ghostText(), /第一候选/);
+});
+
+test('a new prediction restarts at the first candidate', async (t) => {
+  const client = await setup(t);
+  await ready(client, { suggestions: ['第一轮甲', '第一轮乙'] });
+  await client.event('keydown', { key: 'ArrowDown' });
+  assert.match(client.ghostText(), /第一轮乙/);
+  await client.event('keydown', { key: 'Escape' });
+  assert.equal(client.ghost(), null);
+  await client.finishTurn();
+  await client.advance();
+  await client.resolve(1, { suggestions: ['第二轮甲', '第二轮乙'] });
+  assert.match(client.ghostText(), /第二轮甲/);
+  assert.match(client.ghostText(), /1\/2/);
 });
 
 test('Escape dismisses the ghost without inserting or sending', async (t) => {
